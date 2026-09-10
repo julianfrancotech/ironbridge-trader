@@ -19,10 +19,14 @@ accident.
 
 ## What this app deliberately does not know about
 
-- **Real brokerage accounts or real money.** `adapters/paper_broker.py`
-  fills every order at its reference price with no real execution risk.
-  Wiring in a real broker is a one-class change (satisfy
-  `protocols.ExecutionClient`) that is intentionally left undone.
+- **Real money.** By default, `adapters/paper_broker.py` fills every
+  order at its reference price with no real execution risk. An
+  `adapters/alpaca_broker.py` alternative exists (opt-in via
+  `execution_provider=alpaca_paper`) that routes real orders through
+  Alpaca's own infrastructure and order-matching — but only against
+  Alpaca's **paper** endpoint (`TradingClient(paper=True)`), never the
+  live one. There is no live-trading option in this app at all; adding
+  one would be a deliberate, separate decision, not a config flip.
 - **Other users.** There is no auth, no identity service, no per-user
   data isolation — this is a single-operator tool, not a multi-tenant
   platform.

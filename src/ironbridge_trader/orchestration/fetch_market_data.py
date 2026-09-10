@@ -5,7 +5,10 @@ production service's orchestration workflow files play: wire the
 concrete adapters/services for one business workflow and run it, so
 scripts/*.py (the CLI entrypoint) and, if this app ever grows one, a
 scheduler or API layer can both call the same reusable function
-instead of duplicating the wiring.
+instead of duplicating the wiring. build_fetch_bars is this workflow's
+version of run_decision_cycle.py::build_decision_maker: pick the
+concrete adapter, with the same log-and-fall-back-to-the-free-path
+behavior when Alpaca is selected but its credentials aren't set.
 
 Symbols are fetched with bounded concurrency (concurrency.run_bounded,
 the same helper engine/trading_engine.py uses) -- one REST call per
@@ -18,13 +21,21 @@ adapters/market_data.py::fetch_bars.
 
 from __future__ import annotations
 
+import functools
+import logging
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 
-from ironbridge_trader.adapters.market_data import fetch_bars
+from ironbridge_trader.adapters import alpaca_market_data, market_data
 from ironbridge_trader.concurrency import run_bounded
 from ironbridge_trader.config import Settings
+from ironbridge_trader.domain.models import Bar
 from ironbridge_trader.storage.db import Database
+
+logger = logging.getLogger(__name__)
+
+FetchBarsFn = Callable[..., list[Bar]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,9 +46,26 @@ class FetchResult:
     last_date: date
 
 
+def build_fetch_bars(settings: Settings) -> FetchBarsFn:
+    if settings.data_provider == "alpaca":
+        if settings.alpaca_api_key and settings.alpaca_secret_key:
+            logger.info("using Alpaca for market data (data_provider=alpaca)")
+            return functools.partial(
+                alpaca_market_data.fetch_bars,
+                api_key=settings.alpaca_api_key, secret_key=settings.alpaca_secret_key,
+            )
+        logger.warning(
+            "data_provider=alpaca but ALPACA_API_KEY/ALPACA_SECRET_KEY aren't set in .env -- "
+            "falling back to yfinance"
+        )
+    return market_data.fetch_bars
+
+
 def run(db: Database, settings: Settings) -> list[FetchResult]:
+    fetch_bars = build_fetch_bars(settings)
+
     def fetch_one(symbol: str) -> FetchResult:
-        last_ts = db.latest_bar_ts(symbol)
+        last_ts: datetime | None = db.latest_bar_ts(symbol)
         bars = fetch_bars(
             symbol, years=settings.history_years, interval=settings.bar_interval, start=last_ts
         )

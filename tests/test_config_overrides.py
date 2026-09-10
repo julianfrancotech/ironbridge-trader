@@ -58,3 +58,22 @@ def test_unknown_key_is_ignored_on_read(tmp_path):
 def test_save_rejects_non_tunable_key(tmp_path):
     with pytest.raises(ValueError):
         save_overrides({"anthropic_api_key": "sk-nope"}, path=tmp_path / "overrides.json")
+
+
+def test_save_rejects_alpaca_secrets(tmp_path):
+    # Same reasoning as anthropic_api_key: a secret, edited via .env only,
+    # never through a UI meant to be safe to screen-share.
+    with pytest.raises(ValueError):
+        save_overrides({"alpaca_api_key": "nope"}, path=tmp_path / "overrides.json")
+    with pytest.raises(ValueError):
+        save_overrides({"alpaca_secret_key": "nope"}, path=tmp_path / "overrides.json")
+
+
+def test_data_and_execution_provider_round_trip(tmp_path):
+    path = tmp_path / "overrides.json"
+    save_overrides({"data_provider": "alpaca", "execution_provider": "alpaca_paper"}, path=path)
+
+    settings = Settings(**_read_overrides(path))
+
+    assert settings.data_provider == "alpaca"
+    assert settings.execution_provider == "alpaca_paper"

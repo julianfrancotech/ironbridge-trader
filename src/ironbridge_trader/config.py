@@ -5,10 +5,11 @@ problem this single-user local app doesn't have).
 This is the one file you edit to change the watchlist or risk limits --
 or, for the fields listed in TUNABLE_FIELDS, the dashboard's Settings
 tab, which writes to data/settings_overrides.json rather than .env.
-That file is kept separate from .env on purpose: .env holds the one
-secret (ANTHROPIC_API_KEY), and a settings UI that's safe to leave open
-during screen sharing should never be the thing that can read or write
-a secret -- see dashboard/app.py's Settings tab.
+That file is kept separate from .env on purpose: .env holds the app's
+secrets (ANTHROPIC_API_KEY, ALPACA_API_KEY, ALPACA_SECRET_KEY), and a
+settings UI that's safe to leave open during screen sharing should
+never be the thing that can read or write a secret -- see
+dashboard/app.py's Settings tab.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ import os
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
+from typing import Literal
 
 from dotenv import load_dotenv
 
@@ -27,8 +29,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 OVERRIDES_PATH = PROJECT_ROOT / "data" / "settings_overrides.json"
 
 # Fields the Settings UI is allowed to persist. Deliberately excludes:
-#   - anthropic_api_key: a secret, edited via .env only, never through a
-#     UI meant to be safe to screen-share.
+#   - anthropic_api_key / alpaca_api_key / alpaca_secret_key: secrets,
+#     edited via .env only, never through a UI meant to be safe to
+#     screen-share.
 #   - bar_interval: an architectural assumption baked into
 #     MIN_BARS_REQUIRED and the walk-forward split, not a casual dial --
 #     see docs/platform-boundaries.md.
@@ -47,6 +50,8 @@ TUNABLE_FIELDS = (
     "risk_fraction",
     "stop_loss_fraction",
     "max_concurrent_symbols",
+    "data_provider",
+    "execution_provider",
 )
 
 DECIMAL_FIELDS = {"account_equity", "margin_rate", "risk_fraction", "stop_loss_fraction"}
@@ -93,11 +98,27 @@ class Settings:
     # Anthropic API's or a broker's own rate limits.
     max_concurrent_symbols: int = 5
 
+    # Market data / execution providers. Both default to the free,
+    # no-credentials-needed path so nothing breaks for anyone without
+    # Alpaca keys. Explicit opt-in fields rather than auto-switching the
+    # moment ALPACA_API_KEY is set -- unlike the decision-maker choice
+    # (build_decision_maker), switching execution means real orders start
+    # hitting a real broker's (paper) account, which deserves a deliberate
+    # choice, not an implicit one. See adapters/alpaca_market_data.py,
+    # adapters/alpaca_broker.py.
+    data_provider: Literal["yfinance", "alpaca"] = "yfinance"
+    execution_provider: Literal["paper_broker", "alpaca_paper"] = "paper_broker"
+
     data_dir: Path = field(default_factory=lambda: PROJECT_ROOT / "data")
     db_path: Path = field(default_factory=lambda: PROJECT_ROOT / "data" / "ironbridge_trader.db")
     model_dir: Path = field(default_factory=lambda: PROJECT_ROOT / "data" / "models")
 
     anthropic_api_key: str | None = field(default_factory=lambda: os.getenv("ANTHROPIC_API_KEY"))
+    # Alpaca paper-trading credentials. Free to create at alpaca.markets;
+    # never required -- both providers above default to the path that
+    # doesn't need them.
+    alpaca_api_key: str | None = field(default_factory=lambda: os.getenv("ALPACA_API_KEY"))
+    alpaca_secret_key: str | None = field(default_factory=lambda: os.getenv("ALPACA_SECRET_KEY"))
 
     def __post_init__(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)

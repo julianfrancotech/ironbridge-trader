@@ -17,6 +17,7 @@ dependencies = [
     "plotly>=5.22",
     "anthropic>=0.34",
     "python-dotenv>=1.0",
+    "alpaca-py>=0.40",
 ]
 
 [project.optional-dependencies]

@@ -6,8 +6,13 @@ A paper-trading assistant that predicts short-term price direction for a
 small watchlist and decides whether to buy, sell, or hold — with a
 dashboard that shows *why* every decision was made.
 
-**No real broker, no real money.** Every fill is simulated. See
-[Trading theory](#trading-theory) and [Agentic AI theory](#agentic-ai-theory)
+**No real money, ever.** By default every fill is simulated locally
+(`adapters/paper_broker.py`). Real market data and real (paper-account)
+order routing through [Alpaca](https://alpaca.markets) are available as
+an opt-in alternative — still no real money, just real broker
+infrastructure instead of a simulator — see
+[Real market connectivity (Alpaca)](#real-market-connectivity-alpaca).
+See [Trading theory](#trading-theory) and [Agentic AI theory](#agentic-ai-theory)
 for the reasoning behind how it's built, and
 [docs/platform-boundaries.md](docs/platform-boundaries.md) for what it
 deliberately does and doesn't know about.
@@ -51,8 +56,9 @@ Bar history (SQLite)
   risk/manager.py   -- deterministic veto: position limits, margin
         │  (only if it passes)
         ▼
-  adapters/paper_broker.py   -- simulated fill
-        │
+  protocols.ExecutionClient ─┬── adapters/paper_broker.py   (simulated fill, default)
+        │                    └── adapters/alpaca_broker.py  (Alpaca paper endpoint, opt-in)
+        ▼
         ▼
   storage/db.py   -- every bar, prediction, decision, fill, equity point
         │
@@ -116,6 +122,57 @@ deliberately rather than assumed:
   versions this app is verified against, and CI installs from it rather
   than re-resolving ranges every run.
 
+## Real market connectivity (Alpaca)
+
+By default this app needs no brokerage account at all: yfinance for
+data, `PaperBroker` for simulated fills. [Alpaca](https://alpaca.markets)
+is available as an opt-in alternative for both — free market data,
+unlimited **paper** trading on real infrastructure, no minimum balance.
+Select it per-concern in the Settings tab (`data_provider`,
+`execution_provider`); each defaults to the free path and falls back to
+it with a logged warning if selected without `ALPACA_API_KEY` /
+`ALPACA_SECRET_KEY` set in `.env`.
+
+- **Idempotency, same shape as the decision-cycle idempotency above but
+  broker-enforced.** `Order.order_id` (a UUID — see
+  `engine/trading_engine.py`) is sent as Alpaca's `client_order_id`,
+  which Alpaca deduplicates on server-side. A retried submission — the
+  exact failure mode `retry_with_backoff` would otherwise turn dangerous
+  — can't double-place the same order.
+- **No persistent connection / no state machine.** `adapters/market_data.py`'s
+  docstring already explains why this app makes stateless HTTP pulls
+  instead of holding a session open; `adapters/alpaca_broker.py` makes
+  the same call for orders. A CQG-style adapter needs a connection state
+  machine because it holds a websocket open continuously; this app
+  places at most a handful of real orders per daily cycle regardless of
+  watchlist size (order count tracks how often the model clears the
+  confidence floor, not symbols watched), so Alpaca's trade-updates
+  WebSocket stream would mostly sit idle — not worth the lifecycle to
+  manage it would need. See "What would need to change" in
+  platform-boundaries.md for when that stops being true.
+- **Per-order bounded latency instead of a real cross-order batch.**
+  `protocols.ExecutionClient.place_order` returns one `Fill`
+  synchronously per call — the same contract `PaperBroker` satisfies —
+  and is invoked independently from inside each symbol's own concurrent
+  task (`engine/trading_engine.py::run_cycle` runs symbols through a
+  bounded thread pool, one task per symbol). In the realistic
+  case, Alpaca's paper engine fills a market order essentially
+  synchronously, so `submit_order`'s own response is already terminal
+  and `place_order` makes exactly one API call; the rare not-yet-filled
+  case falls back to a short, fixed number of status checks (never
+  open-ended polling), which — combined with concurrent symbol
+  processing — run in parallel with every other symbol's, not
+  sequentially. `adapters/alpaca_broker.py`'s docstring has the full
+  reasoning, including why a literal submit-everything-then-one-bulk-
+  reconcile-call design was considered and not worth the protocol-wide
+  change it would require.
+- **Stocks and crypto need different Alpaca clients and symbol formats.**
+  `adapters/alpaca_market_data.py` / `adapters/alpaca_broker.py` route on
+  whether a symbol contains a "-" (this app's convention, e.g.
+  `BTC-USD`) and translate to Alpaca's own crypto pair format
+  (`BTC/USD`) only at the adapter boundary — nothing upstream needs to
+  know.
+
 ## Configuring it: the dashboard's Settings tab
 
 Every risk and model-training knob in `config.py` is editable from the
@@ -127,13 +184,15 @@ up and confirmed to exist before being put in the UI, not guessed.
 
 Two design choices worth knowing about:
 
-- **Secrets stay out of it.** `ANTHROPIC_API_KEY` is never shown or
-  editable here — only a "configured / not set" status badge. Settings
-  writes only to `data/settings_overrides.json` (non-secret policy
-  values), never to `.env`, specifically so this page is safe to leave
-  open on a shared screen. `bar_interval` is deliberately not exposed
-  either — it's an architectural assumption baked into
-  `MIN_BARS_REQUIRED` and the walk-forward split, not a casual dial.
+- **Secrets stay out of it.** `ANTHROPIC_API_KEY`, `ALPACA_API_KEY`, and
+  `ALPACA_SECRET_KEY` are never shown or editable here — only a
+  "configured / not set" status badge (Anthropic) or the provider
+  dropdown's own fallback warning (Alpaca). Settings writes only to
+  `data/settings_overrides.json` (non-secret policy values), never to
+  `.env`, specifically so this page is safe to leave open on a shared
+  screen. `bar_interval` is deliberately not exposed either — it's an
+  architectural assumption baked into `MIN_BARS_REQUIRED` and the
+  walk-forward split, not a casual dial.
 - **Not every save takes effect immediately.** `config.py::load_settings()`
   is called fresh on every Streamlit rerun, so the dashboard itself
   picks up a save right away. But `symbols`, `history_years`, and

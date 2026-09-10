@@ -3,21 +3,30 @@
 This is where the choice of decision-maker is made -- Claude's
 tool-using agent if ANTHROPIC_API_KEY is configured, otherwise the
 deterministic threshold service -- and where the engine's collaborators
-(model, risk manager, paper broker) get wired together for a real run.
-protocols.DecisionMaker means the engine itself never needs to know
-which one it got.
+(model, risk manager, broker) get wired together for a real run.
+protocols.DecisionMaker / protocols.ExecutionClient mean the engine
+itself never needs to know which concrete one it got.
+
+build_execution_client is deliberately NOT the same "auto-switch the
+moment credentials exist" pattern as build_decision_maker: it only
+picks Alpaca when Settings.execution_provider is explicitly set to
+"alpaca_paper". Sending real orders to a real broker's (paper) account
+is a bigger step than picking an LLM vs. a threshold rule, and deserves
+an explicit choice rather than turning on implicitly because a .env
+file happens to have Alpaca keys in it.
 """
 
 from __future__ import annotations
 
 import logging
 
+from ironbridge_trader.adapters.alpaca_broker import AlpacaBroker
 from ironbridge_trader.adapters.paper_broker import PaperBroker
 from ironbridge_trader.config import Settings
 from ironbridge_trader.domain.models import Decision
 from ironbridge_trader.engine.trading_engine import TradingEngine
 from ironbridge_trader.ml.model import PricePredictor
-from ironbridge_trader.protocols import DecisionMaker
+from ironbridge_trader.protocols import DecisionMaker, ExecutionClient
 from ironbridge_trader.risk.manager import RiskManager
 from ironbridge_trader.risk.position_sizer import PositionSizer
 from ironbridge_trader.services.threshold_agent import ThresholdDecisionService
@@ -35,6 +44,18 @@ def build_decision_maker(settings: Settings, db: Database) -> DecisionMaker:
     return ThresholdDecisionService(settings)
 
 
+def build_execution_client(settings: Settings) -> ExecutionClient:
+    if settings.execution_provider == "alpaca_paper":
+        if settings.alpaca_api_key and settings.alpaca_secret_key:
+            logger.info("using AlpacaBroker (execution_provider=alpaca_paper)")
+            return AlpacaBroker(settings.alpaca_api_key, settings.alpaca_secret_key)
+        logger.warning(
+            "execution_provider=alpaca_paper but ALPACA_API_KEY/ALPACA_SECRET_KEY aren't "
+            "set in .env -- falling back to PaperBroker"
+        )
+    return PaperBroker()
+
+
 def run(db: Database, settings: Settings) -> list[Decision]:
     version = db.latest_model_version()
     if version is None:
@@ -45,7 +66,7 @@ def run(db: Database, settings: Settings) -> list[Decision]:
         market_data=db,
         predictor=predictor,
         decision_maker=build_decision_maker(settings, db),
-        execution=PaperBroker(),
+        execution=build_execution_client(settings),
         risk=RiskManager(settings.max_position_size, settings.margin_rate),
         position_sizer=PositionSizer(settings.risk_fraction, settings.stop_loss_fraction),
         db=db,

@@ -60,6 +60,30 @@ SETTINGS_FIELDS = [
         learn_more_label="ThreadPoolExecutor (Python docs)",
     ),
     dict(
+        key="data_provider", section="Watchlist & data", kind="select", options=["yfinance", "alpaca"],
+        label="Market data source",
+        help=(
+            "yfinance needs no account. alpaca needs ALPACA_API_KEY/ALPACA_SECRET_KEY in .env "
+            "(never entered here) -- falls back to yfinance with a logged warning if selected "
+            "without them. Takes effect on the next fetch_data.py run."
+        ),
+        learn_more="https://docs.alpaca.markets/docs/about-market-data-api",
+        learn_more_label="Market Data API (Alpaca docs)",
+    ),
+    dict(
+        key="execution_provider", section="Watchlist & data", kind="select",
+        options=["paper_broker", "alpaca_paper"],
+        label="Execution provider",
+        help=(
+            "paper_broker fills every order instantly at its reference price, no account needed. "
+            "alpaca_paper submits real orders to Alpaca's paper-trading endpoint (still no real "
+            "money) and needs ALPACA_API_KEY/ALPACA_SECRET_KEY in .env -- falls back to "
+            "paper_broker with a logged warning if selected without them."
+        ),
+        learn_more="https://docs.alpaca.markets/docs/paper-trading",
+        learn_more_label="Paper Trading (Alpaca docs)",
+    ),
+    dict(
         key="feature_lookback", section="Model training", kind="number",
         label="Feature lookback (bars)", min_value=30, max_value=250, step=5,
         help="Bars of history the feature engineer needs before it can compute an indicator. Takes effect on the next train_model.py run.",
@@ -280,6 +304,11 @@ def render_settings_field(spec: dict, current: object) -> object:
             value=float(current), step=spec["step"], key=f"field_{key}",
         )
         value = Decimal(str(result)) if is_decimal else result
+    elif spec["kind"] == "select":
+        options = spec["options"]
+        value = st.selectbox(
+            spec["label"], options=options, index=options.index(current), key=f"field_{key}",
+        )
     else:
         raise ValueError(f"unknown settings field kind: {spec['kind']!r}")
 

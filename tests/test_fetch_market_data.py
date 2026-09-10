@@ -3,6 +3,7 @@ import time
 
 from conftest import make_bars
 
+from ironbridge_trader.adapters import alpaca_market_data, market_data
 from ironbridge_trader.config import Settings
 from ironbridge_trader.orchestration import fetch_market_data
 from ironbridge_trader.storage.db import Database
@@ -16,7 +17,7 @@ def test_run_fetches_full_window_for_a_symbol_never_seen_before(tmp_path, monkey
         calls.append({"symbol": symbol, "start": start})
         return make_bars(symbol=symbol, n=3)
 
-    monkeypatch.setattr(fetch_market_data, "fetch_bars", fake_fetch_bars)
+    monkeypatch.setattr(fetch_market_data.market_data, "fetch_bars", fake_fetch_bars)
     settings = Settings(symbols=("A",))
 
     results = fetch_market_data.run(db, settings)
@@ -36,7 +37,7 @@ def test_run_requests_only_bars_since_the_last_stored_one(tmp_path, monkeypatch)
         calls.append({"symbol": symbol, "start": start})
         return []  # nothing new since `start` -- the realistic same-day-rerun case
 
-    monkeypatch.setattr(fetch_market_data, "fetch_bars", fake_fetch_bars)
+    monkeypatch.setattr(fetch_market_data.market_data, "fetch_bars", fake_fetch_bars)
     settings = Settings(symbols=("A",))
 
     results = fetch_market_data.run(db, settings)
@@ -61,7 +62,7 @@ def test_run_processes_symbols_with_bounded_concurrency(tmp_path, monkeypatch):
             state["active"] -= 1
         return make_bars(symbol=symbol, n=2)
 
-    monkeypatch.setattr(fetch_market_data, "fetch_bars", fake_fetch_bars)
+    monkeypatch.setattr(fetch_market_data.market_data, "fetch_bars", fake_fetch_bars)
     settings = Settings(symbols=symbols, max_concurrent_symbols=3)
 
     results = fetch_market_data.run(db, settings)
@@ -70,3 +71,28 @@ def test_run_processes_symbols_with_bounded_concurrency(tmp_path, monkeypatch):
     assert len(results) == len(symbols)  # every symbol got exactly one result
     assert state["max_active"] > 1  # actually ran concurrently, not sequentially
     assert state["max_active"] <= 3  # but never exceeded the configured bound
+
+
+def test_build_fetch_bars_defaults_to_yfinance():
+    settings = Settings()
+
+    fetch = fetch_market_data.build_fetch_bars(settings)
+
+    assert fetch is market_data.fetch_bars
+
+
+def test_build_fetch_bars_uses_alpaca_when_selected_and_credentials_present():
+    settings = Settings(data_provider="alpaca", alpaca_api_key="key", alpaca_secret_key="secret")
+
+    fetch = fetch_market_data.build_fetch_bars(settings)
+
+    assert fetch.func is alpaca_market_data.fetch_bars
+    assert fetch.keywords == {"api_key": "key", "secret_key": "secret"}
+
+
+def test_build_fetch_bars_falls_back_to_yfinance_without_alpaca_credentials():
+    settings = Settings(data_provider="alpaca", alpaca_api_key=None, alpaca_secret_key=None)
+
+    fetch = fetch_market_data.build_fetch_bars(settings)
+
+    assert fetch is market_data.fetch_bars
