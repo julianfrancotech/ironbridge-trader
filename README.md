@@ -1,5 +1,7 @@
 # Ironbridge Trader
 
+[![CI](https://github.com/julianfrancotech/ironbridge-trader/actions/workflows/ci.yml/badge.svg)](https://github.com/julianfrancotech/ironbridge-trader/actions/workflows/ci.yml)
+
 A paper-trading assistant that predicts short-term price direction for a
 small watchlist and decides whether to buy, sell, or hold — with a
 dashboard that shows *why* every decision was made.
@@ -106,6 +108,13 @@ deliberately rather than assumed:
   This is the actual ceiling of what SQLite can safely do here — a
   process that writes far more often than once a day, or more than one
   writer at a time, would need Postgres (see platform-boundaries.md).
+- **CI + a reproducible dependency lockfile.** `.github/workflows/ci.yml`
+  runs ruff and pytest on every push and PR. `pyproject.toml` uses loose
+  version ranges (so a fresh install always picks up compatible patch
+  releases), but that means two installs months apart can silently
+  resolve different versions — `requirements-lock.txt` pins the exact
+  versions this app is verified against, and CI installs from it rather
+  than re-resolving ranges every run.
 
 ## Configuring it: the dashboard's Settings tab
 
