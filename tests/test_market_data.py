@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 import pandas as pd
 import pytest
 import requests
@@ -21,8 +23,10 @@ class _FakeTicker:
 
     def __init__(self, history_fn):
         self._history_fn = history_fn
+        self.calls: list[dict] = []
 
-    def history(self, period, interval, auto_adjust):
+    def history(self, *, interval, auto_adjust, period=None, start=None):
+        self.calls.append({"period": period, "start": start})
         return self._history_fn()
 
 
@@ -50,3 +54,33 @@ def test_fetch_bars_raises_market_data_error_on_empty_result(monkeypatch):
 
     with pytest.raises(MarketDataError):
         market_data.fetch_bars("NOSUCHSYMBOL", years=1)
+
+
+def test_fetch_bars_requests_full_period_window_when_no_start_given(monkeypatch):
+    ticker = _FakeTicker(_fake_history_frame)
+    monkeypatch.setattr(market_data.yf, "Ticker", lambda symbol: ticker)
+
+    market_data.fetch_bars("TEST", years=5)
+
+    assert ticker.calls == [{"period": "5y", "start": None}]
+
+
+def test_fetch_bars_requests_only_since_last_stored_bar_when_start_given(monkeypatch):
+    ticker = _FakeTicker(_fake_history_frame)
+    monkeypatch.setattr(market_data.yf, "Ticker", lambda symbol: ticker)
+    last_stored = datetime(2024, 6, 1, 15, 30, tzinfo=UTC)
+
+    bars = market_data.fetch_bars("TEST", years=5, start=last_stored)
+
+    # period is never sent alongside start -- yfinance treats them as
+    # alternatives, and sending both would be misleading about intent.
+    assert ticker.calls == [{"period": None, "start": last_stored.date()}]
+    assert len(bars) == 1
+
+
+def test_fetch_bars_returns_empty_list_instead_of_raising_when_nothing_new_since_start(monkeypatch):
+    monkeypatch.setattr(market_data.yf, "Ticker", lambda symbol: _FakeTicker(pd.DataFrame))
+
+    bars = market_data.fetch_bars("TEST", years=5, start=datetime(2024, 6, 1, tzinfo=UTC))
+
+    assert bars == []

@@ -46,6 +46,7 @@ TUNABLE_FIELDS = (
     "margin_rate",
     "risk_fraction",
     "stop_loss_fraction",
+    "max_concurrent_symbols",
 )
 
 DECIMAL_FIELDS = {"account_equity", "margin_rate", "risk_fraction", "stop_loss_fraction"}
@@ -85,6 +86,12 @@ class Settings:
     # order, see risk/position_sizer.py's docstring.
     risk_fraction: Decimal = Decimal("0.01")
     stop_loss_fraction: Decimal = Decimal("0.05")
+
+    # How many symbols run_cycle / fetch_market_data process in parallel
+    # (see engine/trading_engine.py, orchestration/fetch_market_data.py).
+    # Bounded so a large watchlist doesn't thundering-herd past the
+    # Anthropic API's or a broker's own rate limits.
+    max_concurrent_symbols: int = 5
 
     data_dir: Path = field(default_factory=lambda: PROJECT_ROOT / "data")
     db_path: Path = field(default_factory=lambda: PROJECT_ROOT / "data" / "ironbridge_trader.db")

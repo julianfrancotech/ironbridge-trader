@@ -87,6 +87,15 @@ CREATE TABLE IF NOT EXISTS equity_curve (
     position_value REAL NOT NULL,
     PRIMARY KEY (ts, symbol)
 );
+
+-- fills/equity_curve are looked up by symbol far more often than by
+-- ts alone (trading_engine.py's _current_position rebuild does it
+-- once per symbol per cycle), but neither table's primary key leads
+-- with symbol, so that lookup was a full table scan. These indexes
+-- fix it without a destructive PK-reorder migration on databases that
+-- already exist on disk.
+CREATE INDEX IF NOT EXISTS idx_fills_symbol ON fills(symbol, ts);
+CREATE INDEX IF NOT EXISTS idx_equity_curve_symbol ON equity_curve(symbol, ts);
 """
 
 
@@ -143,6 +152,16 @@ class Database:
         with self._connect() as conn:
             rows = conn.execute("SELECT DISTINCT symbol FROM bars ORDER BY symbol").fetchall()
         return [r[0] for r in rows]
+
+    def latest_bar_ts(self, symbol: str) -> datetime | None:
+        """Timestamp of the most recent stored bar for this symbol, or
+        None if it has never been fetched. Lets ingestion ask yfinance
+        for bars since this date instead of redownloading the full
+        history window every run -- see adapters/market_data.py.
+        """
+        with self._connect() as conn:
+            row = conn.execute("SELECT MAX(ts) FROM bars WHERE symbol = ?", (symbol,)).fetchone()
+        return datetime.fromisoformat(row[0]) if row and row[0] is not None else None
 
     # -- model versions -------------------------------------------------
     def insert_model_version(

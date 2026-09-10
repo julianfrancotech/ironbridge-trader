@@ -1,4 +1,7 @@
+import threading
 from decimal import Decimal
+
+from conftest import make_bars
 
 from ironbridge_trader.config import Settings
 from ironbridge_trader.domain.models import Action, Decision, Fill, Order, QuantSignal
@@ -27,9 +30,11 @@ class AlwaysBuyDecisionMaker:
 class RecordingBroker:
     def __init__(self):
         self.orders: list[Order] = []
+        self._lock = threading.Lock()
 
     def place_order(self, order: Order) -> Fill:
-        self.orders.append(order)
+        with self._lock:
+            self.orders.append(order)
         return Fill(
             order_id=order.order_id, symbol=order.symbol, side=order.side,
             price=order.reference_price, quantity=order.quantity, timestamp=order.as_of,
@@ -152,3 +157,43 @@ def test_risk_manager_blocks_order_that_exceeds_position_limit(tmp_path, bars):
 
     assert len(broker.orders) == 0
     assert db.all_fills("TEST") == []
+
+
+def test_run_cycle_processes_every_symbol_exactly_once_when_run_concurrently(tmp_path):
+    db = Database(tmp_path / "t.db")
+    symbols = ["A", "B", "C", "D"]
+    for symbol in symbols:
+        db.upsert_bars(make_bars(symbol=symbol))
+    broker = RecordingBroker()
+    settings = make_settings(max_concurrent_symbols=2)  # pool smaller than symbol count
+    engine = make_engine(db, settings, execution=broker)
+
+    decisions = engine.run_cycle(symbols)
+
+    assert {d.symbol for d in decisions} == set(symbols)
+    assert len(decisions) == len(symbols)  # no duplicates, none lost
+    for symbol in symbols:
+        assert len(db.all_decisions(symbol)) == 1
+        assert len(db.all_fills(symbol)) == 1
+
+
+def test_order_ids_never_collide_across_separate_engine_instances(tmp_path, bars):
+    # Regression test for the bug the UUID-based order_id fixes: the old
+    # self._order_seq counter reset to 0 every process run, so two
+    # separate TradingEngine instances (simulating two different days'
+    # cron invocations) on the same symbol would both mint "TEST-1".
+    broker_day_one = RecordingBroker()
+    db_day_one = Database(tmp_path / "day_one.db")
+    db_day_one.upsert_bars(bars)
+    make_engine(db_day_one, make_settings(), execution=broker_day_one).run_cycle(["TEST"])
+
+    broker_day_two = RecordingBroker()
+    db_day_two = Database(tmp_path / "day_two.db")
+    db_day_two.upsert_bars(bars)
+    make_engine(db_day_two, make_settings(), execution=broker_day_two).run_cycle(["TEST"])
+
+    order_id_day_one = broker_day_one.orders[0].order_id
+    order_id_day_two = broker_day_two.orders[0].order_id
+    assert order_id_day_one != order_id_day_two
+    assert order_id_day_one != "TEST-1"  # the exact collision the old counter produced
+    assert order_id_day_two != "TEST-1"

@@ -49,6 +49,17 @@ SETTINGS_FIELDS = [
         help="Years of daily bars scripts/fetch_data.py pulls per symbol. Takes effect on the next fetch_data.py run.",
     ),
     dict(
+        key="max_concurrent_symbols", section="Watchlist & data", kind="number",
+        label="Max concurrent symbols", min_value=1, max_value=50, step=1,
+        help=(
+            "How many symbols fetch_data.py and a decision cycle process in parallel. "
+            "Higher is faster on a large watchlist but risks hitting the Anthropic API's "
+            "or a broker's rate limits sooner."
+        ),
+        learn_more="https://docs.python.org/3/library/concurrent.futures.html#threadpoolexecutor",
+        learn_more_label="ThreadPoolExecutor (Python docs)",
+    ),
+    dict(
         key="feature_lookback", section="Model training", kind="number",
         label="Feature lookback (bars)", min_value=30, max_value=250, step=5,
         help="Bars of history the feature engineer needs before it can compute an indicator. Takes effect on the next train_model.py run.",

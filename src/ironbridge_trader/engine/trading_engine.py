@@ -28,14 +28,28 @@ decision, a second (possibly LLM-backed, possibly costly) API call, or
 a duplicate row the dashboard would show as two decisions on one day.
 storage/db.py's UNIQUE(symbol, ts) constraint on `decisions` is the
 backstop underneath this check, not a replacement for it.
+
+Concurrency: run_cycle processes symbols with a bounded thread pool
+(concurrency.run_bounded), one task per symbol, never two tasks for
+the same symbol. That constraint is what keeps this safe without any
+new locking: each symbol's has_decision_for -> decide -> insert_decision
+sequence stays fully contained inside its own task, so no cross-symbol
+state is ever touched from two threads at once -- the only thing that
+changes versus a plain for-loop is that *different* symbols' work now
+interleaves instead of running strictly back-to-back. `Order.order_id`
+is a UUID rather than a shared counter for the same reason: nothing to
+coordinate across threads, and no cross-run collision risk once this
+ID is handed to a real broker as an idempotency key (see Phase C).
 """
 
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import datetime
 from decimal import Decimal
 
+from ironbridge_trader.concurrency import run_bounded
 from ironbridge_trader.config import Settings
 from ironbridge_trader.domain.exceptions import TraderError
 from ironbridge_trader.domain.models import (
@@ -79,20 +93,21 @@ class TradingEngine:
         self._position_sizer = position_sizer
         self._db = db
         self._settings = settings
-        self._order_seq = 0
 
     def run_cycle(self, symbols: list[str]) -> list[Decision]:
-        """Evaluate every symbol once. Returns every NEW Decision made
-        (including HOLDs). A symbol already decided for its latest bar
-        is silently idempotent (INFO log, nothing appended) -- that's
-        expected behavior for a retried run, not an error. An actual
-        failure (e.g. not enough history yet) is logged as a WARNING
-        and skipped rather than aborting the whole cycle.
+        """Evaluate every symbol, at most settings.max_concurrent_symbols
+        at a time. Returns every NEW Decision made (including HOLDs). A
+        symbol already decided for its latest bar is silently idempotent
+        (INFO log, nothing appended) -- that's expected behavior for a
+        retried run, not an error. An actual failure (e.g. not enough
+        history yet) is logged as a WARNING and skipped rather than
+        aborting the whole cycle.
         """
+        futures = run_bounded(symbols, self._run_symbol, self._settings.max_concurrent_symbols)
         decisions: list[Decision] = []
-        for symbol in symbols:
+        for symbol, future in zip(symbols, futures, strict=True):
             try:
-                decision = self._run_symbol(symbol)
+                decision = future.result()
             except TraderError as exc:
                 logger.warning("skipping %s this cycle: %s: %s", symbol, type(exc).__name__, exc)
                 continue
@@ -153,9 +168,8 @@ class TradingEngine:
             )
             return
 
-        self._order_seq += 1
         order = Order.market_order(
-            order_id=f"{decision.symbol}-{self._order_seq}",
+            order_id=f"{decision.symbol}-{uuid.uuid4().hex[:10]}",
             symbol=decision.symbol, side=desired_side,
             quantity=quantity, reference_price=reference_price,
             as_of=decision.as_of,

@@ -21,7 +21,7 @@ is used directly as the market-data adapter at read time.
 
 from __future__ import annotations
 
-from datetime import UTC
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pandas as pd
@@ -39,13 +39,26 @@ _TRANSIENT_ERRORS = (requests.exceptions.RequestException, ConnectionError, Time
 
 
 @retry_with_backoff(max_attempts=3, backoff_seconds=1.0, retry_on=_TRANSIENT_ERRORS)
-def _download_history(symbol: str, years: int, interval: str) -> pd.DataFrame:
-    return yf.Ticker(symbol).history(period=f"{years}y", interval=interval, auto_adjust=True)
+def _download_history(symbol: str, years: int, interval: str, start: datetime | None) -> pd.DataFrame:
+    ticker = yf.Ticker(symbol)
+    if start is not None:
+        # Incremental fetch: ask only for bars since the last one already
+        # stored, instead of redownloading the full `years` window every
+        # run. Re-requesting `start`'s own date is deliberate (not
+        # start + 1 day) -- upsert_bars is an idempotent INSERT OR
+        # REPLACE, so the only risk of an off-by-one here is skipping a
+        # day, never duplicating one.
+        return ticker.history(start=start.date(), interval=interval, auto_adjust=True)
+    return ticker.history(period=f"{years}y", interval=interval, auto_adjust=True)
 
 
-def fetch_bars(symbol: str, years: int, interval: str = "1d") -> list[Bar]:
-    df = _download_history(symbol, years, interval)
+def fetch_bars(symbol: str, years: int, interval: str = "1d", start: datetime | None = None) -> list[Bar]:
+    df = _download_history(symbol, years, interval, start)
     if df.empty:
+        if start is not None:
+            # Incremental fetch found nothing newer than `start` -- e.g.
+            # re-running before a new bar exists yet. Not an error.
+            return []
         raise MarketDataError(f"yfinance returned no data for {symbol}")
 
     bars: list[Bar] = []
