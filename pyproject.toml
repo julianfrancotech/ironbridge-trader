@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ironbridge-trader"
+description = "Paper-trading assistant: quant prediction + a tool-using LLM agent, gated by a deterministic risk layer"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "pandas>=2.2",
+    "numpy>=1.26",
+    "scikit-learn>=1.4",
+    "yfinance>=0.2.40",
+    "requests>=2.31",
+    "streamlit>=1.36",
+    "plotly>=5.22",
+    "anthropic>=0.34",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.5", "mypy>=1.10"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff.lint]
+# C408: dict(...) calls stay as-is (dict(zip(cols, row)), plotly's dict(t=20, b=20)
+# kwarg convention) -- rewriting them to literals wouldn't be clearer here.
+ignore = ["C408"]
