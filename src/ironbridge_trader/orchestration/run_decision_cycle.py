@@ -53,7 +53,7 @@ def build_execution_client(settings: Settings) -> ExecutionClient:
             "execution_provider=alpaca_paper but ALPACA_API_KEY/ALPACA_SECRET_KEY aren't "
             "set in .env -- falling back to PaperBroker"
         )
-    return PaperBroker()
+    return PaperBroker(settings.transaction_cost_bps, settings.commission_per_trade)
 
 
 def run(db: Database, settings: Settings) -> list[Decision]:

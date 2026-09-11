@@ -1,3 +1,4 @@
+import sqlite3
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -68,3 +69,33 @@ def test_all_fills_by_symbol_still_returns_only_that_symbols_rows(tmp_path):
 
     assert len(fills) == 1
     assert fills[0]["symbol"] == "A"
+
+
+def test_opening_a_pre_commission_column_db_migrates_it_in_place(tmp_path):
+    # Simulates a database created before the commission column existed --
+    # CREATE TABLE IF NOT EXISTS alone can't add a column to a table that
+    # already exists on disk, which is exactly what Database.__init__
+    # must handle for anyone with an existing data/ironbridge_trader.db.
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(path)
+    conn.execute(
+        "CREATE TABLE fills (id INTEGER PRIMARY KEY AUTOINCREMENT, order_id TEXT NOT NULL, "
+        "symbol TEXT NOT NULL, side TEXT NOT NULL, price REAL NOT NULL, "
+        "quantity INTEGER NOT NULL, ts TEXT NOT NULL)"
+    )
+    conn.commit()
+    conn.close()
+
+    db = Database(path)  # must not raise
+
+    with db._connect() as new_conn:
+        columns = {row[1] for row in new_conn.execute("PRAGMA table_info(fills)")}
+    assert "commission" in columns
+
+    db.insert_fill(
+        Fill(
+            order_id="o1", symbol="A", side=Side.BUY, price=Decimal(10), quantity=1,
+            timestamp=datetime(2024, 1, 1, tzinfo=UTC), commission=Decimal("0.50"),
+        )
+    )
+    assert db.all_fills()[0]["commission"] == 0.5

@@ -49,13 +49,18 @@ TUNABLE_FIELDS = (
     "margin_rate",
     "risk_fraction",
     "stop_loss_fraction",
+    "transaction_cost_bps",
+    "commission_per_trade",
     "max_concurrent_symbols",
     "data_provider",
     "execution_provider",
     "trading_enabled",
 )
 
-DECIMAL_FIELDS = {"account_equity", "margin_rate", "risk_fraction", "stop_loss_fraction"}
+DECIMAL_FIELDS = {
+    "account_equity", "margin_rate", "risk_fraction", "stop_loss_fraction",
+    "transaction_cost_bps", "commission_per_trade",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +104,22 @@ class Settings:
     # order, see risk/position_sizer.py's docstring.
     risk_fraction: Decimal = Decimal("0.01")
     stop_loss_fraction: Decimal = Decimal("0.05")
+
+    # Transaction costs (adapters/paper_broker.py, analytics/performance.py):
+    # PaperBroker fills are synthetic, so without these every backtest and
+    # paper-trading number implicitly assumes zero spread, zero slippage,
+    # zero commission -- an assumption real trading never gets. Bar data
+    # has no bid/ask to model spread and slippage as separate line items,
+    # so transaction_cost_bps blends both into one number applied against
+    # the trader (BUY fills higher, SELL fills lower than the reference
+    # price); 10 bps is a conservative round-number estimate for a mostly
+    # liquid-large-cap watchlist that also holds BTC-USD, which typically
+    # trades wider. commission_per_trade defaults to 0 to match Alpaca's
+    # real commission-free equities/crypto, kept as a knob for a future
+    # broker that isn't. AlpacaBroker ignores both -- its fills are real,
+    # already reflecting whatever the market and broker actually charged.
+    transaction_cost_bps: Decimal = Decimal(10)
+    commission_per_trade: Decimal = Decimal(0)
 
     # How many symbols run_cycle / fetch_market_data process in parallel
     # (see engine/trading_engine.py, orchestration/fetch_market_data.py).

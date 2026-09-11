@@ -77,7 +77,11 @@ CREATE TABLE IF NOT EXISTS fills (
     side TEXT NOT NULL,
     price REAL NOT NULL,
     quantity INTEGER NOT NULL,
-    ts TEXT NOT NULL
+    ts TEXT NOT NULL,
+    -- Separate from `price` on purpose -- see domain/models.py::Fill.
+    -- Only a fresh CREATE gets this column here; see _migrate() below
+    -- for databases that already exist on disk.
+    commission REAL NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS equity_curve (
@@ -119,6 +123,17 @@ class Database:
         self._path = path
         with self._connect() as conn:
             conn.executescript(SCHEMA)
+            self._migrate(conn)
+
+    def _migrate(self, conn: sqlite3.Connection) -> None:
+        """Schema tweaks CREATE TABLE IF NOT EXISTS can't express -- SQLite
+        has no ALTER TABLE ADD COLUMN IF NOT EXISTS, so check first. Runs
+        on every connect; each check is one fast PRAGMA, negligible next
+        to everything else __init__ already does.
+        """
+        fills_columns = {row[1] for row in conn.execute("PRAGMA table_info(fills)")}
+        if "commission" not in fills_columns:
+            conn.execute("ALTER TABLE fills ADD COLUMN commission REAL NOT NULL DEFAULT 0")
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -282,13 +297,14 @@ class Database:
     def insert_fill(self, fill: Fill) -> None:
         with self._connect() as conn:
             conn.execute(
-                "INSERT INTO fills (order_id, symbol, side, price, quantity, ts) VALUES (?,?,?,?,?,?)",
+                "INSERT INTO fills (order_id, symbol, side, price, quantity, ts, commission) "
+                "VALUES (?,?,?,?,?,?,?)",
                 (fill.order_id, fill.symbol, fill.side.name, float(fill.price),
-                 fill.quantity, fill.timestamp.isoformat()),
+                 fill.quantity, fill.timestamp.isoformat(), float(fill.commission)),
             )
 
     def all_fills(self, symbol: str | None = None) -> list[dict]:
-        query = "SELECT order_id, symbol, side, price, quantity, ts FROM fills"
+        query = "SELECT order_id, symbol, side, price, quantity, ts, commission FROM fills"
         params: tuple = ()
         if symbol:
             query += " WHERE symbol = ?"
@@ -296,7 +312,7 @@ class Database:
         query += " ORDER BY ts"
         with self._connect() as conn:
             rows = conn.execute(query, params).fetchall()
-        cols = ["order_id", "symbol", "side", "price", "quantity", "ts"]
+        cols = ["order_id", "symbol", "side", "price", "quantity", "ts", "commission"]
         return [dict(zip(cols, r)) for r in rows]
 
     def record_equity_point(self, ts: datetime, symbol: str, position_qty: int, position_value: Decimal) -> None:

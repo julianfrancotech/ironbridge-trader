@@ -91,11 +91,16 @@ def _fill_from_alpaca_order(order_id: str, symbol: str, side: Side, alpaca_order
     # filled_avg_price/filled_qty come back as str | float | None -- routed
     # through str() first so a float never gets fed straight to Decimal()
     # and picks up binary-float noise, same convention as the rest of the app.
+    # commission=0 explicitly, not just the Fill default: this is a real
+    # fill, already reflecting whatever the market and Alpaca actually
+    # charged (nothing, for equities/crypto) -- unlike PaperBroker, there
+    # is no separate cost model here to apply.
     return Fill(
         order_id=order_id, symbol=symbol, side=side,
         price=Decimal(str(alpaca_order.filled_avg_price)),
         quantity=int(float(alpaca_order.filled_qty)),
         timestamp=alpaca_order.filled_at.astimezone(UTC),
+        commission=Decimal(0),
     )
 
 

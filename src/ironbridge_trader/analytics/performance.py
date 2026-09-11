@@ -68,6 +68,7 @@ def compute_equity_curve(db: Database, symbols: list[str], starting_equity: Deci
             else:
                 cash += notional
                 qty[f["symbol"]] = qty.get(f["symbol"], 0.0) - f["quantity"]
+            cash -= f.get("commission", 0.0)  # a cost regardless of which side the trade was
             fill_idx += 1
 
         position_value = sum(

@@ -161,6 +161,28 @@ SETTINGS_FIELDS = [
         learn_more="https://www.sec.gov/answers/stopord.htm",
         learn_more_label="Stop Order (U.S. SEC)",
     ),
+    dict(
+        key="transaction_cost_bps", section="Transaction costs", kind="number",
+        label="Spread + slippage (bps)", min_value=0.0, max_value=200.0, step=1.0,
+        help=(
+            "One blended estimate of spread and slippage, applied against you on every "
+            "PaperBroker fill (buys fill higher, sells fill lower than the reference price). "
+            "Only affects simulated fills — AlpacaBroker's fills are real and already include "
+            "whatever the market actually charged. 10 bps is a conservative round number for a "
+            "mostly liquid watchlist; raise it for less liquid symbols."
+        ),
+        learn_more="https://www.investopedia.com/terms/b/bid-askspread.asp",
+        learn_more_label="Bid-Ask Spread (Investopedia)",
+    ),
+    dict(
+        key="commission_per_trade", section="Transaction costs", kind="number",
+        label="Commission per trade ($)", min_value=0.0, max_value=50.0, step=0.5,
+        help=(
+            "Flat fee added on top of every PaperBroker fill, separate from the fill price "
+            "itself. Defaults to 0 to match Alpaca's real commission-free equities and crypto — "
+            "raise it if modeling a broker that charges one."
+        ),
+    ),
 ]
 
 # Streamlit reruns this whole script on every widget interaction, so

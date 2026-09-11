@@ -3,7 +3,7 @@ deterministic threshold service would have decided each day, writing
 the results to a separate database (data/backtest.db) so they never mix
 with real paper-trading history.
 
-Two honesty notes, also shown in the dashboard:
+Three honesty notes, also shown in the dashboard:
 
 1. Uses ThresholdDecisionService, not the Claude agent. Backtesting an
    LLM agent bar-by-bar over years of history means one API call per
@@ -20,6 +20,12 @@ Two honesty notes, also shown in the dashboard:
    unbiased performance estimate. The honest number is the held-out
    eval_accuracy / eval_auc that orchestration/retrain_model.py reports
    (a real walk-forward split with no lookahead).
+
+3. Fills go through the same PaperBroker cost model as live paper
+   trading (Settings.transaction_cost_bps / commission_per_trade) --
+   still not zero-friction, but still only one blended estimate, not
+   real market microstructure. Costs make the honest number in note 2
+   worse, not better; they don't make this a substitute for it.
 """
 
 from __future__ import annotations
@@ -81,7 +87,7 @@ def run(source_db: Database, settings: Settings) -> BacktestResult:
         market_data=replay,
         predictor=predictor,
         decision_maker=ThresholdDecisionService(settings),
-        execution=PaperBroker(),
+        execution=PaperBroker(settings.transaction_cost_bps, settings.commission_per_trade),
         risk=RiskManager(settings.max_position_size, settings.margin_rate),
         position_sizer=PositionSizer(settings.risk_fraction, settings.stop_loss_fraction),
         db=backtest_db,

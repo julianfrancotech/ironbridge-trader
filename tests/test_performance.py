@@ -44,6 +44,23 @@ def test_equity_curve_tracks_cash_plus_mark_to_market(tmp_path):
     assert list(equity.round(2)) == [1000.0, 1050.0, 950.0, 1100.0, 1150.0]
 
 
+def test_equity_curve_subtracts_commission_regardless_of_side(tmp_path):
+    db = Database(tmp_path / "t.db")
+    dates = _seed_single_symbol(db)
+    db.insert_fill(
+        Fill(
+            order_id="o2", symbol="A", side=Side.SELL, price=Decimal(110), quantity=2,
+            timestamp=dates[1], commission=Decimal("1.50"),
+        )
+    )
+
+    equity = compute_equity_curve(db, ["A"], starting_equity=Decimal(1000))
+
+    # day 1: 500 cash + 220 proceeds - 1.50 commission = 718.50, plus the
+    # remaining 3 shares marked at day 1's close (110) = 330 -> 1048.50
+    assert float(equity.iloc[1]) == 1048.50
+
+
 def test_buy_and_hold_fully_invests_and_can_beat_the_strategy(tmp_path):
     db = Database(tmp_path / "t.db")
     _seed_single_symbol(db)

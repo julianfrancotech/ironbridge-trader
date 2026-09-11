@@ -87,3 +87,18 @@ def test_trading_enabled_round_trips_as_a_bool(tmp_path):
 
     assert overrides["trading_enabled"] is False
     assert Settings(**overrides).trading_enabled is False
+
+
+def test_transaction_cost_fields_round_trip_as_decimal(tmp_path):
+    path = tmp_path / "overrides.json"
+    save_overrides(
+        {"transaction_cost_bps": Decimal(25), "commission_per_trade": Decimal("1.50")}, path=path
+    )
+
+    overrides = _read_overrides(path)
+
+    assert overrides["transaction_cost_bps"] == Decimal(25)
+    assert isinstance(overrides["commission_per_trade"], Decimal)
+    settings = Settings(**overrides)
+    assert settings.transaction_cost_bps == Decimal(25)
+    assert settings.commission_per_trade == Decimal("1.50")

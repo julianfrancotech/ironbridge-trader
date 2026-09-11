@@ -52,7 +52,16 @@ class Bar:
 
 @dataclass(frozen=True, slots=True)
 class Fill:
-    """A completed paper execution. Immutable."""
+    """A completed execution. Immutable.
+
+    `price` is the actual execution price -- for PaperBroker, already
+    including the spread/slippage haircut (see adapters/paper_broker.py);
+    for a real broker, whatever it actually filled at. `commission` is
+    kept separate, matching how a real brokerage statement shows them:
+    one number for what you paid *for the shares*, another for the fee
+    on top. Defaults to 0 so every existing caller/test that predates
+    cost modeling keeps working unchanged.
+    """
 
     order_id: str
     symbol: str
@@ -60,6 +69,7 @@ class Fill:
     price: Decimal
     quantity: int
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
+    commission: Decimal = Decimal(0)
 
 
 @dataclass(slots=True)
