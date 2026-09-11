@@ -1,10 +1,14 @@
 import threading
 import time
+from datetime import UTC, datetime
 
+import pytest
 from conftest import make_bars
 
 from ironbridge_trader.adapters import alpaca_market_data, market_data
 from ironbridge_trader.config import Settings
+from ironbridge_trader.domain.exceptions import MarketDataError
+from ironbridge_trader.domain.models import Bar
 from ironbridge_trader.orchestration import fetch_market_data
 from ironbridge_trader.storage.db import Database
 
@@ -71,6 +75,29 @@ def test_run_processes_symbols_with_bounded_concurrency(tmp_path, monkeypatch):
     assert len(results) == len(symbols)  # every symbol got exactly one result
     assert state["max_active"] > 1  # actually ran concurrently, not sequentially
     assert state["max_active"] <= 3  # but never exceeded the configured bound
+
+
+def test_run_rejects_an_implausible_bar_instead_of_storing_it(tmp_path, monkeypatch):
+    db = Database(tmp_path / "t.db")
+    existing = make_bars(symbol="A", n=5)
+    db.upsert_bars(existing)
+    bad_price = existing[-1].close * 10  # 10x scaling-error shape
+
+    def fake_fetch_bars(symbol, years, interval, start=None):
+        return [
+            Bar(
+                symbol="A", timestamp=datetime(2099, 1, 1, tzinfo=UTC),
+                open=bad_price, high=bad_price, low=bad_price, close=bad_price, volume=1000,
+            )
+        ]
+
+    monkeypatch.setattr(fetch_market_data.market_data, "fetch_bars", fake_fetch_bars)
+    settings = Settings(symbols=("A",))
+
+    with pytest.raises(MarketDataError):
+        fetch_market_data.run(db, settings)
+
+    assert len(db.get_bars("A")) == 5  # unchanged -- the bad bar was never stored
 
 
 def test_build_fetch_bars_defaults_to_yfinance():

@@ -52,6 +52,7 @@ TUNABLE_FIELDS = (
     "max_concurrent_symbols",
     "data_provider",
     "execution_provider",
+    "trading_enabled",
 )
 
 DECIMAL_FIELDS = {"account_equity", "margin_rate", "risk_fraction", "stop_loss_fraction"}
@@ -59,6 +60,13 @@ DECIMAL_FIELDS = {"account_equity", "margin_rate", "risk_fraction", "stop_loss_f
 
 @dataclass(frozen=True, slots=True)
 class Settings:
+    # Manual kill switch, checked once at the top of
+    # orchestration/run_decision_cycle.py::run() -- flip to False to
+    # stop live trading immediately, independent of and faster than any
+    # code change. Deliberately does NOT gate scripts/backtest.py: a
+    # paused live strategy shouldn't also block research/backtesting.
+    trading_enabled: bool = True
+
     # Watchlist: a small, liquid, mixed set by default (equities + one
     # index ETF + crypto, which trades on weekends too). Edit freely.
     symbols: tuple[str, ...] = ("AAPL", "MSFT", "SPY", "BTC-USD")

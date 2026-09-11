@@ -77,3 +77,13 @@ def test_data_and_execution_provider_round_trip(tmp_path):
 
     assert settings.data_provider == "alpaca"
     assert settings.execution_provider == "alpaca_paper"
+
+
+def test_trading_enabled_round_trips_as_a_bool(tmp_path):
+    path = tmp_path / "overrides.json"
+    save_overrides({"trading_enabled": False}, path=path)
+
+    overrides = _read_overrides(path)
+
+    assert overrides["trading_enabled"] is False
+    assert Settings(**overrides).trading_enabled is False

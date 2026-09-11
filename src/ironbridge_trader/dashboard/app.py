@@ -14,6 +14,7 @@ Run with:  streamlit run src/ironbridge_trader/dashboard/app.py
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pandas as pd
@@ -34,6 +35,15 @@ BACKTEST_DB_NAME = "backtest.db"
 # and confirmed to exist, not guessed -- see README for the rationale
 # on why that matters here specifically.
 SETTINGS_FIELDS = [
+    dict(
+        key="trading_enabled", section="Trading control", kind="toggle",
+        label="Trading enabled",
+        help=(
+            "The kill switch. Off skips every live decision cycle entirely (run_paper_trader.py "
+            "logs and exits, no decisions, no orders) until turned back on -- independent of, and "
+            "faster than, any code change. Does NOT affect scripts/backtest.py or scripts/train_model.py."
+        ),
+    ),
     dict(
         key="symbols", section="Watchlist & data", kind="tags",
         label="Watchlist (comma-separated symbols)",
@@ -309,6 +319,8 @@ def render_settings_field(spec: dict, current: object) -> object:
         value = st.selectbox(
             spec["label"], options=options, index=options.index(current), key=f"field_{key}",
         )
+    elif spec["kind"] == "toggle":
+        value = st.toggle(spec["label"], value=bool(current), key=f"field_{key}")
     else:
         raise ValueError(f"unknown settings field kind: {spec['kind']!r}")
 
@@ -316,6 +328,33 @@ def render_settings_field(spec: dict, current: object) -> object:
     if spec.get("learn_more"):
         st.markdown(f"[{spec['learn_more_label']} ↗]({spec['learn_more']})")
     return value
+
+
+# A scheduled script (fetch_data.py, run_paper_trader.py) that silently
+# stops running -- a closed laptop, a crashed process -- is a different,
+# more basic failure than a bad decision, and nothing else here would
+# ever surface it. This is deliberately just "check the dashboard,"
+# not push alerting: this app has no email/SMS/Slack integration to
+# send through, and building one is a separate feature, not a cheap one.
+_STALE_AFTER = timedelta(days=3)  # generous: covers a normal Fri-run/Mon-expected weekend gap
+
+
+def render_heartbeat_status(db: Database, source: str, label: str) -> None:
+    hb = db.latest_heartbeat(source)
+    if hb is None:
+        st.info(f"**{label}**: never run yet.")
+        return
+
+    ts = datetime.fromisoformat(hb["ts"])
+    age = datetime.now(UTC) - ts
+    when = f"{age.days}d {age.seconds // 3600}h ago" if age.days else f"{age.seconds // 3600}h ago"
+
+    if hb["status"] == "error":
+        st.error(f"**{label}**: last run {when} FAILED — {hb['detail']}")
+    elif age > _STALE_AFTER:
+        st.warning(f"**{label}**: last successful run was {when} — overdue, check the scheduled job is running.")
+    else:
+        st.success(f"**{label}**: last run {when}, ok.")
 
 
 st.title("🌉 Ironbridge Trader")
@@ -350,6 +389,15 @@ if SETTINGS.anthropic_api_key:
     st.sidebar.success("ANTHROPIC_API_KEY set — live cycles use the Claude tool-using agent.")
 else:
     st.sidebar.info("No ANTHROPIC_API_KEY — live cycles use the deterministic threshold fallback.")
+
+if mode == "Live paper trading":
+    if not SETTINGS.trading_enabled:
+        st.warning("⏸️ **Trading is paused** (kill switch is off) — flip it back on in the ⚙️ Settings tab.")
+    hb_cols = st.columns(2)
+    with hb_cols[0]:
+        render_heartbeat_status(db, "fetch_data", "Data fetch")
+    with hb_cols[1]:
+        render_heartbeat_status(db, "run_paper_trader", "Decision cycle")
 
 tab_overview, tab_flow, tab_decisions, tab_model, tab_portfolio, tab_settings = st.tabs(
     ["Overview (all symbols)", "Price & Signal", "Agent Decisions", "Model", "Portfolio", "⚙️ Settings"]

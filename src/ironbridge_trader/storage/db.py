@@ -88,6 +88,21 @@ CREATE TABLE IF NOT EXISTS equity_curve (
     PRIMARY KEY (ts, symbol)
 );
 
+-- One row per unattended cron script invocation (fetch_data.py,
+-- run_paper_trader.py), success or failure. This is the only way to
+-- notice "the job silently stopped running" -- a closed laptop, a
+-- crashed process -- which is a different, more basic failure mode
+-- than the model producing bad decisions, and one nothing else here
+-- detects.
+CREATE TABLE IF NOT EXISTS run_heartbeats (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source TEXT NOT NULL,
+    ts TEXT NOT NULL,
+    status TEXT NOT NULL,
+    detail TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_run_heartbeats_source ON run_heartbeats(source, ts);
+
 -- fills/equity_curve are looked up by symbol far more often than by
 -- ts alone (trading_engine.py's _current_position rebuild does it
 -- once per symbol per cycle), but neither table's primary key leads
@@ -153,15 +168,27 @@ class Database:
             rows = conn.execute("SELECT DISTINCT symbol FROM bars ORDER BY symbol").fetchall()
         return [r[0] for r in rows]
 
-    def latest_bar_ts(self, symbol: str) -> datetime | None:
-        """Timestamp of the most recent stored bar for this symbol, or
-        None if it has never been fetched. Lets ingestion ask yfinance
-        for bars since this date instead of redownloading the full
-        history window every run -- see adapters/market_data.py.
+    def latest_bar(self, symbol: str) -> Bar | None:
+        """Most recent stored bar for this symbol, or None if it has
+        never been fetched. Two independent callers need this: ingestion
+        asks for bars since this one's timestamp instead of redownloading
+        the full history window every run (adapters/market_data.py), and
+        data_quality.validate_bars needs its close to sanity-check the
+        first newly-fetched bar's day-over-day move.
         """
         with self._connect() as conn:
-            row = conn.execute("SELECT MAX(ts) FROM bars WHERE symbol = ?", (symbol,)).fetchone()
-        return datetime.fromisoformat(row[0]) if row and row[0] is not None else None
+            row = conn.execute(
+                "SELECT symbol, ts, open, high, low, close, volume FROM bars "
+                "WHERE symbol = ? ORDER BY ts DESC LIMIT 1",
+                (symbol,),
+            ).fetchone()
+        if row is None:
+            return None
+        return Bar(
+            symbol=row[0], timestamp=datetime.fromisoformat(row[1]),
+            open=Decimal(str(row[2])), high=Decimal(str(row[3])), low=Decimal(str(row[4])),
+            close=Decimal(str(row[5])), volume=row[6],
+        )
 
     # -- model versions -------------------------------------------------
     def insert_model_version(
@@ -290,3 +317,22 @@ class Database:
             rows = conn.execute(query, params).fetchall()
         cols = ["ts", "symbol", "position_qty", "position_value"]
         return [dict(zip(cols, r)) for r in rows]
+
+    # -- run heartbeats -------------------------------------------------
+    def record_heartbeat(self, source: str, ts: datetime, status: str, detail: str = "") -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO run_heartbeats (source, ts, status, detail) VALUES (?,?,?,?)",
+                (source, ts.isoformat(), status, detail),
+            )
+
+    def latest_heartbeat(self, source: str) -> dict | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT source, ts, status, detail FROM run_heartbeats "
+                "WHERE source = ? ORDER BY ts DESC LIMIT 1",
+                (source,),
+            ).fetchone()
+        if row is None:
+            return None
+        return dict(zip(["source", "ts", "status", "detail"], row))

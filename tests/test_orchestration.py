@@ -1,6 +1,7 @@
 from ironbridge_trader.adapters.alpaca_broker import AlpacaBroker
 from ironbridge_trader.adapters.paper_broker import PaperBroker
 from ironbridge_trader.config import Settings
+from ironbridge_trader.orchestration import run_decision_cycle
 from ironbridge_trader.orchestration.run_decision_cycle import (
     build_decision_maker,
     build_execution_client,
@@ -55,3 +56,13 @@ def test_build_execution_client_falls_back_to_paper_broker_without_alpaca_creden
     settings = Settings(execution_provider="alpaca_paper", alpaca_api_key=None, alpaca_secret_key=None)
 
     assert isinstance(build_execution_client(settings), PaperBroker)
+
+
+def test_run_skips_the_whole_cycle_when_trading_is_disabled(tmp_path):
+    # No trained model exists in this fresh db -- if the kill switch
+    # check didn't run first, this would raise SystemExit instead of
+    # returning cleanly, proving the check happens before anything else.
+    settings = Settings(trading_enabled=False)
+    db = Database(tmp_path / "t.db")
+
+    assert run_decision_cycle.run(db, settings) == []

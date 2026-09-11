@@ -122,6 +122,30 @@ deliberately rather than assumed:
   versions this app is verified against, and CI installs from it rather
   than re-resolving ranges every run.
 
+Three more, once the failure mode being guarded against is "this is
+now running unattended against something that matters," not just
+"this cron job retried":
+
+- **A manual kill switch.** `Settings.trading_enabled` (Settings tab)
+  skips every live decision cycle entirely when off — checked once, in
+  `orchestration/run_decision_cycle.py::run()`, deliberately *not*
+  inside `TradingEngine` itself so `scripts/backtest.py` keeps working
+  while live trading is paused. Faster and more reliable than "go find
+  the process and kill it."
+- **Run heartbeats.** `scripts/fetch_data.py` and `scripts/run_paper_trader.py`
+  record a timestamped success/failure row (`storage/db.py`'s
+  `run_heartbeats` table) on every invocation, surfaced at the top of
+  the dashboard. Nothing else here would notice a cron job that
+  silently stops running at all — a closed laptop, a crashed process —
+  which is a different, more basic failure than a bad decision.
+- **A data-quality gate on ingested bars.** `features/data_quality.py`
+  rejects any freshly-fetched bar whose close moves implausibly
+  (>50%) from the prior one, against either the rest of the batch or
+  the last bar already stored. A dropped connection is worth retrying;
+  a decimal-point/scaling glitch from the data provider is wrong data
+  returned *successfully* — retrying gets the same wrong answer back,
+  so the only sound response is refusing to store it.
+
 ## Real market connectivity (Alpaca)
 
 By default this app needs no brokerage account at all: yfinance for

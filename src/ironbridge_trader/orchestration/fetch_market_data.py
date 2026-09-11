@@ -14,9 +14,12 @@ Symbols are fetched with bounded concurrency (concurrency.run_bounded,
 the same helper engine/trading_engine.py uses) -- one REST call per
 symbol is the same shape as the decision cycle's per-symbol Claude
 calls, and benefits from the same fix. Each call also asks for bars
-only since that symbol's last stored one (db.latest_bar_ts) rather
-than redownloading the full history_years window every run -- see
-adapters/market_data.py::fetch_bars.
+only since that symbol's last stored one (db.latest_bar) rather than
+redownloading the full history_years window every run -- see
+adapters/market_data.py::fetch_bars. Every freshly-fetched batch is
+sanity-checked (features/data_quality.py) before it's stored -- a bad
+print or a scaling glitch from the data provider is wrong data
+returned *successfully*, so nothing upstream would otherwise catch it.
 """
 
 from __future__ import annotations
@@ -25,12 +28,13 @@ import functools
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date
 
 from ironbridge_trader.adapters import alpaca_market_data, market_data
 from ironbridge_trader.concurrency import run_bounded
 from ironbridge_trader.config import Settings
 from ironbridge_trader.domain.models import Bar
+from ironbridge_trader.features.data_quality import validate_bars
 from ironbridge_trader.storage.db import Database
 
 logger = logging.getLogger(__name__)
@@ -65,7 +69,8 @@ def run(db: Database, settings: Settings) -> list[FetchResult]:
     fetch_bars = build_fetch_bars(settings)
 
     def fetch_one(symbol: str) -> FetchResult:
-        last_ts: datetime | None = db.latest_bar_ts(symbol)
+        previous_bar = db.latest_bar(symbol)
+        last_ts = previous_bar.timestamp if previous_bar is not None else None
         bars = fetch_bars(
             symbol, years=settings.history_years, interval=settings.bar_interval, start=last_ts
         )
@@ -75,6 +80,8 @@ def run(db: Database, settings: Settings) -> list[FetchResult]:
             assert last_ts is not None  # only possible when start was passed, i.e. last_ts is set
             return FetchResult(symbol=symbol, bar_count=0, first_date=last_ts.date(), last_date=last_ts.date())
 
+        previous_close = previous_bar.close if previous_bar is not None else None
+        validate_bars(symbol, bars, previous_close)
         db.upsert_bars(bars)
         return FetchResult(
             symbol=symbol, bar_count=len(bars),

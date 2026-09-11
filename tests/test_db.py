@@ -5,16 +5,37 @@ from ironbridge_trader.domain.models import Fill, Side
 from ironbridge_trader.storage.db import Database
 
 
-def test_latest_bar_ts_is_none_for_a_symbol_never_fetched(tmp_path):
+def test_latest_bar_is_none_for_a_symbol_never_fetched(tmp_path):
     db = Database(tmp_path / "t.db")
-    assert db.latest_bar_ts("TEST") is None
+    assert db.latest_bar("TEST") is None
 
 
-def test_latest_bar_ts_returns_the_most_recent_stored_bar(tmp_path, bars):
+def test_latest_bar_returns_the_most_recent_stored_bar(tmp_path, bars):
     db = Database(tmp_path / "t.db")
     db.upsert_bars(bars)
 
-    assert db.latest_bar_ts("TEST") == bars[-1].timestamp
+    latest = db.latest_bar("TEST")
+
+    assert latest.timestamp == bars[-1].timestamp
+    assert latest.close == bars[-1].close
+
+
+def test_heartbeat_is_none_for_a_source_never_recorded(tmp_path):
+    db = Database(tmp_path / "t.db")
+    assert db.latest_heartbeat("fetch_data") is None
+
+
+def test_heartbeat_round_trips_and_keeps_only_the_latest_per_source(tmp_path):
+    db = Database(tmp_path / "t.db")
+    db.record_heartbeat("fetch_data", datetime(2024, 1, 1, tzinfo=UTC), "ok", "4 symbol(s)")
+    db.record_heartbeat("fetch_data", datetime(2024, 1, 2, tzinfo=UTC), "error", "boom")
+    db.record_heartbeat("run_paper_trader", datetime(2024, 1, 2, tzinfo=UTC), "ok", "1 decision")
+
+    hb = db.latest_heartbeat("fetch_data")
+
+    assert hb["status"] == "error"
+    assert hb["detail"] == "boom"
+    assert db.latest_heartbeat("run_paper_trader")["status"] == "ok"
 
 
 def test_fills_lookup_by_symbol_uses_an_index_not_a_full_scan(tmp_path):

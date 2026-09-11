@@ -57,6 +57,14 @@ def build_execution_client(settings: Settings) -> ExecutionClient:
 
 
 def run(db: Database, settings: Settings) -> list[Decision]:
+    if not settings.trading_enabled:
+        # The kill switch. Checked here, not inside TradingEngine, so
+        # scripts/backtest.py (which builds its own engine directly,
+        # never through this function) keeps working even while live
+        # trading is paused.
+        logger.warning("trading_enabled=False -- skipping this cycle (kill switch is on)")
+        return []
+
     version = db.latest_model_version()
     if version is None:
         raise SystemExit("no trained model found -- run scripts/train_model.py first")
