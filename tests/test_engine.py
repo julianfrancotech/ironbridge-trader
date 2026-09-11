@@ -43,12 +43,14 @@ class RecordingBroker:
 
 def make_settings(**overrides) -> Settings:
     # risk_fraction/stop_loss_fraction chosen so a ~$100 reference price
-    # (conftest's default bar fixture) sizes to a few dozen units --
-    # comfortably under max_position_size=100 for tests that expect a
-    # BUY to succeed, without hardcoding an exact quantity anywhere here.
+    # (conftest's default bar fixture) sizes to a few dozen units, well
+    # under a few thousand dollars notional -- comfortably under the
+    # default max_position_fraction (0.25 of a $100,000 account, i.e.
+    # a $25,000 cap) for tests that expect a BUY to succeed, without
+    # hardcoding an exact quantity anywhere here.
     return Settings(**{
         "risk_fraction": Decimal("0.002"), "stop_loss_fraction": Decimal("0.05"),
-        "max_position_size": 100, **overrides,
+        **overrides,
     })
 
 
@@ -57,7 +59,7 @@ def make_engine(db: Database, settings: Settings, *, decision_maker=None, execut
         market_data=db, predictor=StubPredictor(),
         decision_maker=decision_maker or AlwaysBuyDecisionMaker(),
         execution=execution or RecordingBroker(),
-        risk=RiskManager(settings.max_position_size, settings.margin_rate),
+        risk=RiskManager(settings.max_position_fraction, settings.margin_rate),
         position_sizer=PositionSizer(settings.risk_fraction, settings.stop_loss_fraction),
         db=db, settings=settings,
     )
@@ -150,7 +152,9 @@ def test_risk_manager_blocks_order_that_exceeds_position_limit(tmp_path, bars):
     db = Database(tmp_path / "t.db")
     db.upsert_bars(bars)
     broker = RecordingBroker()
-    settings = make_settings(max_position_size=1)  # sized quantity will always breach this
+    # 0.0001 * $100,000 = a $10 cap -- the sized position's notional value
+    # will always breach this regardless of quantity/price.
+    settings = make_settings(max_position_fraction=Decimal("0.0001"))
     engine = make_engine(db, settings, execution=broker)
 
     engine.run_cycle(["TEST"])

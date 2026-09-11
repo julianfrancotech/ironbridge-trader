@@ -75,7 +75,7 @@ def run(db: Database, settings: Settings) -> list[Decision]:
         predictor=predictor,
         decision_maker=build_decision_maker(settings, db),
         execution=build_execution_client(settings),
-        risk=RiskManager(settings.max_position_size, settings.margin_rate),
+        risk=RiskManager(settings.max_position_fraction, settings.margin_rate),
         position_sizer=PositionSizer(settings.risk_fraction, settings.stop_loss_fraction),
         db=db,
         settings=settings,

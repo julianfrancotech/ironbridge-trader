@@ -34,11 +34,16 @@ class InsufficientMarginError(TraderError):
 
 
 class PositionLimitExceededError(TraderError):
-    def __init__(self, symbol: str, projected_quantity: int, max_quantity: int) -> None:
+    """Notional-value based, not a unit count -- see risk/manager.py's
+    docstring for why a fixed unit cap doesn't make sense next to a
+    dollar-risk-based position sizer.
+    """
+
+    def __init__(self, symbol: str, projected_notional: Decimal, max_notional: Decimal) -> None:
         self.symbol = symbol
-        self.projected_quantity = projected_quantity
-        self.max_quantity = max_quantity
+        self.projected_notional = projected_notional
+        self.max_notional = max_notional
         super().__init__(
-            f"Order on {symbol} would move position to {projected_quantity}, "
-            f"limit is ±{max_quantity}"
+            f"Order on {symbol} would move position notional to {projected_notional:.2f}, "
+            f"limit is {max_notional:.2f}"
         )

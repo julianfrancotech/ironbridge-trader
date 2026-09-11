@@ -134,9 +134,13 @@ SETTINGS_FIELDS = [
         help="The simulated account size every risk check and position-sizing calculation is measured against.",
     ),
     dict(
-        key="max_position_size", section="Risk & position sizing", kind="number",
-        label="Max position size (units)", min_value=1, max_value=100_000, step=1,
-        help="Hard cap on units held in one symbol, enforced by risk/manager.py regardless of what the sizer computes.",
+        key="max_position_fraction", section="Risk & position sizing", kind="slider",
+        label="Max position size (% of equity)", min_value=0.01, max_value=1.0, step=0.01,
+        help=(
+            "Hard cap on one symbol's position value, as a fraction of account equity — enforced "
+            "by risk/manager.py regardless of what the sizer computes. A fraction, not a fixed unit "
+            "count, so the cap means the same thing at any price."
+        ),
         learn_more="https://en.wikipedia.org/wiki/Risk_management",
         learn_more_label="Risk management (Wikipedia)",
     ),

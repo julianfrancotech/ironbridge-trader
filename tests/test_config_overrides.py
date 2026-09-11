@@ -27,11 +27,11 @@ def test_round_trips_decimal_and_tuple_fields(tmp_path):
 
 def test_settings_built_from_overrides_uses_saved_values(tmp_path):
     path = tmp_path / "overrides.json"
-    save_overrides({"max_position_size": 250}, path=path)
+    save_overrides({"max_position_fraction": Decimal("0.5")}, path=path)
 
     settings = Settings(**_read_overrides(path))
 
-    assert settings.max_position_size == 250
+    assert settings.max_position_fraction == Decimal("0.5")
     assert settings.margin_rate == Decimal("0.25")  # untouched fields keep their default
 
 
@@ -47,12 +47,12 @@ def test_corrupt_file_yields_no_overrides_instead_of_raising(tmp_path):
 
 def test_unknown_key_is_ignored_on_read(tmp_path):
     path = tmp_path / "overrides.json"
-    path.write_text(json.dumps({"anthropic_api_key": "sk-should-not-load", "max_position_size": 5}))
+    path.write_text(json.dumps({"anthropic_api_key": "sk-should-not-load", "max_position_fraction": 0.5}))
 
     overrides = _read_overrides(path)
 
     assert "anthropic_api_key" not in overrides
-    assert overrides["max_position_size"] == 5
+    assert overrides["max_position_fraction"] == Decimal("0.5")
 
 
 def test_save_rejects_non_tunable_key(tmp_path):

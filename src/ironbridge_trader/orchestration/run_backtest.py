@@ -88,7 +88,7 @@ def run(source_db: Database, settings: Settings) -> BacktestResult:
         predictor=predictor,
         decision_maker=ThresholdDecisionService(settings),
         execution=PaperBroker(settings.transaction_cost_bps, settings.commission_per_trade),
-        risk=RiskManager(settings.max_position_size, settings.margin_rate),
+        risk=RiskManager(settings.max_position_fraction, settings.margin_rate),
         position_sizer=PositionSizer(settings.risk_fraction, settings.stop_loss_fraction),
         db=backtest_db,
         settings=settings,

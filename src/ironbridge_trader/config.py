@@ -45,7 +45,7 @@ TUNABLE_FIELDS = (
     "agent_max_tool_iterations",
     "anthropic_model",
     "account_equity",
-    "max_position_size",
+    "max_position_fraction",
     "margin_rate",
     "risk_fraction",
     "stop_loss_fraction",
@@ -58,7 +58,7 @@ TUNABLE_FIELDS = (
 )
 
 DECIMAL_FIELDS = {
-    "account_equity", "margin_rate", "risk_fraction", "stop_loss_fraction",
+    "account_equity", "max_position_fraction", "margin_rate", "risk_fraction", "stop_loss_fraction",
     "transaction_cost_bps", "commission_per_trade",
 }
 
@@ -92,7 +92,14 @@ class Settings:
     # Risk (deterministic gate, applied to every proposed order regardless
     # of which DecisionMaker produced it):
     account_equity: Decimal = Decimal(100_000)
-    max_position_size: int = 100
+    # Hard cap on one symbol's position, as a fraction of account_equity
+    # (notional value) -- not a fixed unit count. See risk/manager.py's
+    # docstring: a fixed count doesn't scale with price, and a real
+    # backtest confirmed that's not a theoretical concern (see
+    # scripts/risk_veto_report.py). 0.25 is a backstop, not the primary
+    # sizing mechanism -- risk_fraction below is what actually drives
+    # typical position sizes; this just bounds the worst case.
+    max_position_fraction: Decimal = Decimal("0.25")
     margin_rate: Decimal = Decimal("0.25")
 
     # Position sizing (risk/position_sizer.py): how many units to buy/sell

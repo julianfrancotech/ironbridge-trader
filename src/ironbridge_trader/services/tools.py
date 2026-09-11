@@ -154,7 +154,7 @@ def run_tool(name: str, tool_input: dict, ctx: AgentContext) -> dict:
 
     if name == "get_risk_limits":
         return {
-            "max_position_size": ctx.settings.max_position_size,
+            "max_position_fraction": float(ctx.settings.max_position_fraction),
             "margin_rate": float(ctx.settings.margin_rate),
             "account_equity": float(ctx.settings.account_equity),
             "risk_fraction": float(ctx.settings.risk_fraction),
