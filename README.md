@@ -27,6 +27,7 @@ python3.12 -m venv .venv
 ./.venv/bin/python scripts/train_model.py     # train the quant model, print held-out accuracy
 ./.venv/bin/python scripts/run_paper_trader.py  # one live decision cycle across the watchlist
 ./.venv/bin/python scripts/backtest.py        # replay history, populate the dashboard's Backtest tab
+./.venv/bin/python scripts/multi_regime_backtest.py  # same backtest, sliced into per-regime pass/fail
 
 ./.venv/bin/streamlit run src/ironbridge_trader/dashboard/app.py
 ```
@@ -303,6 +304,17 @@ the sizer — it's the honest consequence of a fixed dollar risk budget
 against a highly-priced, highly-volatile asset, and the dashboard is
 built to surface it rather than hide it.
 
+What "beats buy-and-hold" means precisely — not just a higher number,
+but a written, pre-committed bar checked once against a sealed
+evaluation window, including a permutation test to rule out the result
+being noise — is [docs/validation-plan.md](docs/validation-plan.md).
+`scripts/multi_regime_backtest.py` checks the first three of that
+doc's four criteria (return, Sharpe, drawdown, all vs. the benchmark)
+across several calendar-length slices of history instead of one
+continuous span — a model can look good over the whole period and
+still be worthless in half of it. It's a development-time diagnostic,
+not the sealed evaluation itself (no permutation test here yet).
+
 **The backtest is honestly caveated, not just honestly labeled.**
 `orchestration/run_backtest.py` replays history bar-by-bar without
 letting the model see future *bars* (see `adapters/replay_market_data.py`).
@@ -408,6 +420,8 @@ scripts/                 thin CLI entrypoints into orchestration/
 docs/
   platform-boundaries.md  what this app does and deliberately doesn't know about, and what would need to
                            change for it to go from daily-batch to live/intraday
+  validation-plan.md      the pre-committed bar for "this strategy beats its benchmark" -- written
+                           before any multi-regime backtest is run against it, on purpose
 tests/                   unit + integration tests (pytest)
 ```
 
