@@ -90,17 +90,31 @@ def compute_features(bars: list[Bar]) -> dict[str, float] | None:
     return {k: float(v) for k, v in row.items()}
 
 
-def build_training_frame(bars: list[Bar]) -> pd.DataFrame:
+def build_training_frame(bars: list[Bar], min_move_fraction: float = 0.0) -> pd.DataFrame:
     """Features + label for every bar that has enough trailing history AND
     a known next-bar outcome (so the very last bar, with no "next" yet,
     is dropped). label = 1 if the next bar's close is higher, else 0.
+
+    min_move_fraction: if > 0, also drops any bar whose next-bar return
+    falls within +/- this fraction (a "dead zone") -- e.g. 0.005 drops
+    a next-bar move smaller than 0.5%. Those are the bars where "up or
+    down" is closest to an arbitrary coin flip and provides the least
+    genuine signal to learn from or be graded against. Defaults to 0
+    (no dead zone, every bar kept) so every existing caller keeps its
+    current behavior unchanged -- see
+    scripts/compare_label_dead_zone.py, which uses this to test
+    whether that's actually the right default.
     """
     features = _feature_frame(bars)
     close = pd.Series([float(b.close) for b in bars])
-    label = (close.shift(-1) > close).astype(float)
+    next_return = close.shift(-1) / close - 1
+    label = (next_return > 0).astype(float)
 
     frame = features.copy()
     frame["label"] = label
+    frame["next_return"] = next_return
     frame["timestamp"] = [b.timestamp for b in bars]
     frame = frame.dropna()
+    if min_move_fraction > 0:
+        frame = frame[frame["next_return"].abs() > min_move_fraction]
     return frame.reset_index(drop=True)

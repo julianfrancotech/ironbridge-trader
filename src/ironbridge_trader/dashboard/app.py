@@ -108,6 +108,17 @@ SETTINGS_FIELDS = [
         learn_more_label="Walk-forward optimization (Wikipedia)",
     ),
     dict(
+        key="min_move_fraction", section="Model training", kind="slider",
+        label="Label dead zone", min_value=0.0, max_value=0.02, step=0.001,
+        help=(
+            "Drops bars whose next-bar move is smaller than this from training and eval -- "
+            "'up or down' on a near-flat day is closest to a coin flip either way. 0.005 (0.5%) is "
+            "validated, not assumed: scripts/permutation_test_dead_zone.py found it a statistically "
+            "significant (p=0.02) improvement in held-out AUC over no dead zone (0). Takes effect "
+            "on the next train_model.py run."
+        ),
+    ),
+    dict(
         key="decision_confidence_floor", section="Decision-making", kind="slider",
         label="Confidence floor", min_value=0.5, max_value=0.95, step=0.01,
         help="Below this confidence, the decision is HOLD. Raise it to trade less often, only on stronger signals. Takes effect on the next paper-trading cycle or backtest.",

@@ -24,19 +24,42 @@ from ironbridge_trader.ml.model import PricePredictor
 from ironbridge_trader.storage.db import Database
 
 
-def build_dataset(db: Database) -> pd.DataFrame:
-    """Pool training rows across every symbol with stored bars.
+def new_model() -> HistGradientBoostingClassifier:
+    """The one place these hyperparameters are set -- shared by the
+    production training path and any experiment/diagnostic script
+    (e.g. scripts/compare_symbol_pooling.py) that needs to fit a
+    directly comparable model, so the two can never silently drift
+    apart.
+    """
+    return HistGradientBoostingClassifier(max_depth=4, learning_rate=0.06, max_iter=200)
 
-    One pooled model rather than one per symbol: every feature is a
+
+def build_dataset(
+    db: Database, symbols: list[str] | None = None, min_move_fraction: float = 0.0
+) -> pd.DataFrame:
+    """Pool training rows across `symbols` (default: every symbol with
+    stored bars).
+
+    Pooling across symbols, rather than training one model per symbol,
+    is the working assumption, not settled fact: every feature is a
     normalized ratio or z-score, not a raw price (see
     features/engineering.py), so patterns learned on a heavily-traded
-    symbol transfer to a thinner one, and the model has years x N-symbols
-    of rows to learn from instead of years x 1.
+    symbol transfer to a thinner one in principle, and the model has
+    years x N-symbols of rows to learn from instead of years x 1. But
+    pooling instruments as different as a large-cap stock and BTC-USD
+    also assumes the learned relationship is the same for both, which
+    is a real assumption worth checking, not free -- see
+    scripts/compare_symbol_pooling.py, which uses this `symbols` param
+    to test it directly.
+
+    min_move_fraction is passed straight through to
+    build_training_frame (default 0, no dead zone) -- see that
+    docstring and scripts/compare_label_dead_zone.py.
     """
     frames = []
-    for symbol in db.symbols_with_bars():
+    for symbol in symbols if symbols is not None else db.symbols_with_bars():
         bars = db.get_bars(symbol)
-        frame = build_training_frame(bars)
+        frame = build_training_frame(bars, min_move_fraction=min_move_fraction)
         frame["symbol"] = symbol
         frames.append(frame)
     if not frames:
@@ -44,14 +67,28 @@ def build_dataset(db: Database) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True).sort_values("timestamp").reset_index(drop=True)
 
 
-def train_and_version(db: Database, settings: Settings) -> PricePredictor:
-    dataset = build_dataset(db)
+def train_eval_split(
+    db: Database, settings: Settings, symbols: list[str] | None = None, min_move_fraction: float = 0.0
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """build_dataset, then a walk-forward split by
+    settings.train_test_split_ratio (train = earlier rows, eval = later
+    rows, no shuffling -- shuffling here would leak future information
+    into training). Shared by the production path and
+    experiment/diagnostic scripts (scripts/permutation_test_dead_zone.py)
+    so the split logic never drifts between them.
+    """
+    dataset = build_dataset(db, symbols, min_move_fraction=min_move_fraction)
     split_idx = int(len(dataset) * settings.train_test_split_ratio)
     train, eval_ = dataset.iloc[:split_idx], dataset.iloc[split_idx:]
     if train.empty or eval_.empty:
         raise ValueError("not enough rows for a train/eval split -- fetch more history")
+    return train, eval_
 
-    model = HistGradientBoostingClassifier(max_depth=4, learning_rate=0.06, max_iter=200)
+
+def train_and_version(db: Database, settings: Settings) -> PricePredictor:
+    train, eval_ = train_eval_split(db, settings, min_move_fraction=settings.min_move_fraction)
+
+    model = new_model()
     model.fit(train[FEATURE_NAMES], train["label"])
 
     eval_pred = model.predict(eval_[FEATURE_NAMES])

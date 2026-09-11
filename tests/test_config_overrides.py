@@ -102,3 +102,13 @@ def test_transaction_cost_fields_round_trip_as_decimal(tmp_path):
     settings = Settings(**overrides)
     assert settings.transaction_cost_bps == Decimal(25)
     assert settings.commission_per_trade == Decimal("1.50")
+
+
+def test_min_move_fraction_round_trips_as_a_plain_float(tmp_path):
+    path = tmp_path / "overrides.json"
+    save_overrides({"min_move_fraction": 0.01}, path=path)
+
+    overrides = _read_overrides(path)
+
+    assert overrides["min_move_fraction"] == 0.01
+    assert Settings(**overrides).min_move_fraction == 0.01

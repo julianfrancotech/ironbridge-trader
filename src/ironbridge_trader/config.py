@@ -41,6 +41,7 @@ TUNABLE_FIELDS = (
     "history_years",
     "feature_lookback",
     "train_test_split_ratio",
+    "min_move_fraction",
     "decision_confidence_floor",
     "agent_max_tool_iterations",
     "anthropic_model",
@@ -83,6 +84,19 @@ class Settings:
     # ML: labels are "next bar's close > this bar's close".
     feature_lookback: int = 60  # bars of history the feature engineer needs
     train_test_split_ratio: float = 0.8  # walk-forward: first 80% train, last 20% eval
+
+    # Bars whose next-bar move falls within +/- this fraction are
+    # dropped from training (and from held-out eval) -- "up or down"
+    # on a near-flat day is closest to an arbitrary coin flip and
+    # provides the least genuine signal either way, for the model to
+    # learn from or be graded against. 0.005 (0.5%) is the value
+    # scripts/compare_label_dead_zone.py and
+    # scripts/permutation_test_dead_zone.py validated: a real,
+    # statistically significant (p=0.02) improvement in held-out AUC
+    # over no dead zone, not just an assumed default. See
+    # docs/validation-plan.md and features/engineering.py's
+    # build_training_frame docstring. 0 disables it (every bar kept).
+    min_move_fraction: float = 0.005
 
     # Decision service: below this confidence, or on a tie, the decision is HOLD.
     decision_confidence_floor: float = 0.55
